@@ -5,10 +5,14 @@ const app = electron.app
 // Module to create native browser window.
 const BrowserWindow = electron.BrowserWindow
 
+const os = require('os')
+const fs = require('fs')
 const path = require('path')
 const url = require('url')
+const crypto = require('crypto')
+const child_process = require('child_process')
 
-const { Menu } = require('electron')
+const { Menu, ipcMain, nativeImage } = require('electron')
 const template = [
   {
     label: 'Edit',
@@ -163,7 +167,17 @@ function createWindow () {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.on('ready', createWindow)
+app.on('ready', function () {
+  const base = os.homedir();
+  const appHome = path.join(base, '.pngm');
+  console.log(appHome);
+  if (!fs.existsSync(appHome)) {
+    fs.mkdirSync(appHome);
+  }
+
+  createWorkerProcess();
+  createWindow();
+});
 
 // Quit when all windows are closed.
 app.on('window-all-closed', function () {
@@ -185,3 +199,61 @@ app.on('activate', function () {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
+
+var queuedWorks = new Array();
+var workerProcess;
+var workingInFlight = false;
+
+function createWorkerProcess() {
+  workerProcess = child_process.fork(path.join(__dirname, 'worker.js'));
+  workerProcess.on('message', msg => {
+    workingInFlight = false;
+    pollWork();
+  });
+}
+
+function pollWork() {
+  if (queuedWorks.length <= 0) {
+    return;
+  }
+
+  const work = queuedWorks.splice(0);
+  workingInFlight = true;
+  workerProcess.send({
+    src: work.src,
+    dst: work.dst,
+    q: work.q
+  });
+}
+
+// In this section, we introduce an IPC event listener to receive new file
+// selection.
+ipcMain.on('newInput', (event, arg) => {
+  const filename = arg.filename;
+
+  // Generate a hash for input file.
+  const hash = crypto.createHash('sha256');
+  hash.update(filename);
+  const dstFilename = path.join(os.homedir(), '.pngm', 'tmp_' + hash.digest('hex') + '.png');
+
+  // Remove existing queued work with the same filename.
+  for (let i = 0; i < queuedWorks.length; i++) {
+    if (queuedWorks[i].src === filename) {
+      queuedWorks.splice(i);
+      break;
+    }
+  }
+
+  const work = {
+    src: filename,
+    dst: dstFilename,
+    q: 50,
+    sender: event.sender
+  };
+
+  queuedWorks.unshift(work);
+
+  if (!workingInFlight) {
+    pollWork();
+  }
+});
