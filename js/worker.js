@@ -4,6 +4,7 @@ const UPNG = require('./UPNG');
 
 process.on('message', msg => {
   if (msg.cmd === 'compress') {
+    console.log(msg);
     workerMain(msg).then(res => {
       if (!res) console.error('Something is wrong!');
 
@@ -33,7 +34,10 @@ async function workerMain(msg) {
   const q = msg.q;
 
   // Ensure presence of the file.
-  if (!fs.existsSync(src)) return false;
+  if (!fs.existsSync(src)) {
+    console.error(src + ' not exists!');
+    return false;
+  }
 
   const buf = await fs.readFileSync(src);
   const mgc = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -51,7 +55,8 @@ async function workerMain(msg) {
   const compressedBuf = new Buffer(UPNG.encode([rgba], img.width, img.height, q));
 
   // Send the result back.
-  fs.writeFileSync(dst);
+  console.log('Writing to ' + dst);
+  fs.writeFileSync(dst, compressedBuf);
 
   return true;
 }

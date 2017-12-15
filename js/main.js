@@ -203,12 +203,19 @@ app.on('activate', function () {
 var queuedWorks = new Array();
 var workerProcess;
 var workingInFlight = false;
+var currentWork;
 
 function createWorkerProcess() {
   workerProcess = child_process.fork(path.join(__dirname, 'worker.js'));
   workerProcess.on('message', msg => {
     workingInFlight = false;
     pollWork();
+
+    currentWork.sender.send('outputReady', {
+      src: currentWork.src
+    });
+
+    currentWork = null;
   });
 }
 
@@ -217,9 +224,11 @@ function pollWork() {
     return;
   }
 
-  const work = queuedWorks.splice(0);
+  const work = queuedWorks.splice(0)[0];
+  currentWork = work;
   workingInFlight = true;
   workerProcess.send({
+    cmd: 'compress',
     src: work.src,
     dst: work.dst,
     q: work.q

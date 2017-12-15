@@ -8,6 +8,8 @@
 // ADDPNG 加载顺序
 // ##############################
 
+const { ipcRenderer } = require('electron');
+
 const UPNG = require('./js/UPNG.js')
 const UZIP = require('./js/UZIP.js')
 var Promise = require('promise');
@@ -111,29 +113,17 @@ function setCurr(nc) {
 
 
 function multiThreadRecompute(i,func,callback){
-    var p = pngs[i]
-    var worker = new Worker('./js/recompute-worker.js');
+    var p = pngs[i];
 
-    
     //发送数据
-    worker.postMessage({
-        img:p,
-        num:cnum,
-        index:i
+    ipcRenderer.send('newInput', {
+        filename: p.filename
     });
-    
+
     // 接受数据
-    worker.addEventListener('message', function (e) {
-        
-
-        console.log("worker finished,num is ",i)
-        // 一定要确保销毁
-        worker.terminate();
-    
+    ipcRenderer.once('outputReady', msg => {
+        console.log("worker finished,num is ", i)
         return new Promise((resolve, reject) => {
-
-            p.ndata = e.data.pndata;
-            p.nrgba = e.data.pnrgba;
             shouldListAnim = true;
             resolve()
             // 因为多线程，不一定哪个最先，这里要处理,setCurr 选择错误之所在
@@ -156,7 +146,7 @@ function multiThreadRecompute(i,func,callback){
 
 function update()
 {
-
+    return;
     if(curr!=-1) {  list.innerHTML = "";  totl.innerHTML = "";  }
     if(curr == -1){
         // list.innerHTML = "<div id=\"drag-container\"style=\"font-size:1.3em; padding:1em; text-align:center;height:100%;display:table;\"><div id=\"drag-area\" onclick=\"PageServices.showOpenDialog()\"><div id=\"drag-placeholder\" class=\"drag-placeholder\"></div><!-- <span>Drag PNG files here!</span> --></div></div>"
@@ -310,7 +300,7 @@ function multiThreadRead(buff,name){
 
 var canInitLoading = true;
 
-function addPNG(buff, name)
+function addPNG(filename, name)
 {
 
     //排序错误了
@@ -322,20 +312,21 @@ function addPNG(buff, name)
         document.getElementById('window-loader').setAttribute("style","transform:translate(-50%,-50%) scale(0.25);opacity:1;");
         canInitLoading = false;
     }
-    
-    
-
 
     return new Promise((resolve, reject) => {
-        var mgc=[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-        var ubuff=new Uint8Array(buff);
-        for(var i=0; i<8; i++) if(mgc[i]!=ubuff[i]) return;
-        var img  = UPNG.decode(buff)
-        var rgba = UPNG.toRGBA8(img)[0];
-        var npng = {name:name, width:img.width, height:img.height, odata:buff, orgba:new Uint8Array(rgba), ndata:null, nrgba:null };
-        var nc = pngs.length;  
-        pngs.push(npng);  
-    
+        const npng = {
+            name,
+            filename,
+            width: 0,
+            height: 0,
+            odata: null,
+            orgba: null,
+            ndata: null,
+            nrgba: null
+        };
+        pngs.push(npng);
+        const nc = pngs.length - 1;
+
         // // ### MultiThread ### 还可以进一步优化 选择错误了
         compressCounter = prevliLength;
         multiThreadRecompute(nc,setCurr,afterAdd)
@@ -601,20 +592,15 @@ function onMU(e) {  document.removeEventListener("mousemove",onMM,false);  docum
 
 // ###### File Drop Data ######
 function onFileDrop(e) {  cancel(e);
-    var fls = e.dataTransfer? e.dataTransfer.files : e.target.files;
-    for(var i=0; i<fls.length; i++) {
-
-        console.log(fls[i].name)
-        var f = fls[i];
-        var r = new FileReader();
-        r._file = f;
-        r.onload = dropLoaded;
-        r.readAsArrayBuffer(f);
+    const files = e.dataTransfer? e.dataTransfer.files : e.target.files;
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        addPNG(file.path, file.name);
     }
     // 一旦上传文件，立即更新列表数据
     // unhighlight(e);  
 
-    nowliLength += fls.length;
+    nowliLength += files.length;
 }			
 function dropLoaded(e) {  addPNG(e.target.result, e.target._file.name); 
     return new Promise((resolve, reject) => {
